@@ -1,0 +1,6 @@
+﻿PDF to Data - personal use.
+
+This installer bundles third-party components under their own licenses:
+  * opendataloader-pdf (Apache-2.0)
+  * Eclipse Temurin JRE 17 (GPLv2 with Classpath Exception)
+  * CPython (PSF License)

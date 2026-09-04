@@ -1,0 +1,16 @@
+# build output
+dist/
+build/
+__pycache__/
+*.spec
+
+# runtime state - never commit
+.started-ok
+.update-failed.json
+.backup-*/
+*.old
+settings.json
+
+# local test artifacts
+scanned.pdf
+scanned.md

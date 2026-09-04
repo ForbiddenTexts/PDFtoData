@@ -1,0 +1,4 @@
+# Optional: drag-and-drop support for the file queue.
+# The app runs fine without it -- the "Browse..." buttons always work.
+# Everything else PDF to Data uses is Python standard library.
+tkinterdnd2>=0.4.0
