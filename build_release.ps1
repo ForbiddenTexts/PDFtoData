@@ -140,6 +140,15 @@ if (-not $NoHybrid) {
 & $pyExe -m pip install --no-warn-script-location --no-input $spec
 if ($LASTEXITCODE -ne 0) { Die "pip install $spec failed ($LASTEXITCODE)" }
 
+# Smoke-test the module invocation the app actually uses. pip's console-script
+# .exe wrappers bake in an absolute interpreter path and break the moment the
+# bundle is moved, so they are never a valid check that the bundle works.
+& $pyExe -m opendataloader_pdf --help > $null
+if ($LASTEXITCODE -ne 0) { Die "the bundled engine cannot run (python -m opendataloader_pdf failed)" }
+& $pyExe -m opendataloader_pdf.hybrid_server --help > $null
+if ($LASTEXITCODE -ne 0) { Note 'WARNING: bundled hybrid server did not respond to --help' }
+Note 'bundled engine verified via python -m'
+
 $engineVersion = (& $pyExe -m pip show opendataloader-pdf |
                   Select-String -Pattern '^Version:\s*(.+)$').Matches.Groups[1].Value.Trim()
 if (-not $engineVersion) { Die 'could not read the installed engine version via pip show' }

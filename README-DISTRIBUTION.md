@@ -83,6 +83,24 @@ nothing is ever importable and the CLI silently does not exist. `build_release.p
 uncomments it and adds `Lib\site-packages`; if you assemble a bundle by hand, do
 the same.
 
+### Console scripts are not relocatable
+
+pip writes `Scripts\*.exe` wrappers with the **absolute path of the interpreter
+they were installed with** baked in. Move the tree - or ship it to anyone else -
+and the wrapper dies before Python even starts: exit code 1 and no output at all,
+which is close to undebuggable from the outside.
+
+The app therefore never invokes those wrappers. It resolves the interpreter next
+to the `Scripts` folder and runs `python.exe -m opendataloader_pdf` (and
+`-m opendataloader_pdf.hybrid_server`). The wrappers are left in place only so
+the Environment tab can detect that the engine is installed, and that check now
+actually *runs* the CLI rather than trusting that a file exists.
+
+This one is easy to miss on the build machine, where the baked-in path still
+resolves - the bundle appears to work locally while being broken everywhere else.
+`build_release.ps1` smoke-tests `python -m opendataloader_pdf --help` after
+installing, so a bundle that cannot run fails the build.
+
 ---
 
 ## First release checklist

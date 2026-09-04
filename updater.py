@@ -321,6 +321,44 @@ def parse_java_major(text):
     return first
 
 
+# pip writes console-script .exe wrappers with the absolute path of the
+# interpreter they were installed with baked in. They are NOT relocatable: move
+# the tree (or ship it to another machine) and the wrapper dies before Python
+# starts - exit code 1, no output at all. Invoke the module with the bundled
+# interpreter instead.
+CLI_MODULES = {
+    "opendataloader-pdf": "opendataloader_pdf",
+    "opendataloader-pdf-hybrid": "opendataloader_pdf.hybrid_server",
+}
+
+
+def cli_argv(stem, exe_path):
+    """argv prefix for a CLI, preferring `python.exe -m <module>`.
+
+    Falls back to the .exe wrapper when no sibling interpreter can be found
+    (e.g. the CLI came from PATH rather than a Scripts folder we can reason
+    about), which is the case where the wrapper is normally still valid.
+    """
+    if not exe_path:
+        return []
+    module = CLI_MODULES.get(stem)
+    python = python_for_cli(exe_path)
+    if python and module:
+        return [python, "-m", module]
+    return [str(exe_path)]
+
+
+def cli_works(argv, timeout=90):
+    """Actually run the CLI so a broken wrapper cannot pass as 'installed'."""
+    if not argv:
+        return False, "not found"
+    code, out = _run(list(argv) + ["--help"], timeout=timeout)
+    if code == 0:
+        return True, ""
+    first = next((ln for ln in (out or "").splitlines() if ln.strip()), "")
+    return False, (first[:120] or f"exited with code {code} and printed nothing")
+
+
 def child_env():
     """Environment for CLI subprocesses, with the bundled JRE made findable.
 

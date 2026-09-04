@@ -1342,7 +1342,17 @@ class PDFToDataApp:
         # --- base + hybrid CLIs ------------------------------------------------
         base = find_cli("opendataloader-pdf", snap["cli_path"])
         if base:
-            result["base"] = (True, base, "")
+            # Running it is the only honest check: a pip .exe wrapper whose baked-in
+            # interpreter path is gone still exists on disk but cannot start.
+            argv = updater.cli_argv("opendataloader-pdf", base)
+            ok, why = updater.cli_works(argv)
+            how = "via python -m" if len(argv) > 1 else "via the script wrapper"
+            if ok:
+                result["base"] = (True, f"{base}  ({how})", "")
+            else:
+                result["base"] = (False, f"found but will not run: {why}",
+                                  "The install looks incomplete - reinstall the app, "
+                                  f"or run:  {PIP_BASE}")
         else:
             result["base"] = (False, "not found in this venv or on PATH",
                               f"Run:  {PIP_BASE}   (or set the path below)")
@@ -1417,6 +1427,9 @@ class PDFToDataApp:
         if not self.env_java[0]:
             return f"Java 11+ is required. {self.env_java[1]} - install from adoptium.net."
         if not self.env_base[0]:
+            if "will not run" in str(self.env_base[1]):
+                return ("The conversion engine is present but cannot start - "
+                        "see the Environment tab.")
             return f"opendataloader-pdf not found. Run: {PIP_BASE}"
         if self.v["mode"].get() == "hybrid" and not self.env_hybrid[0]:
             return f"Hybrid mode needs the hybrid extra. Run: {PIP_HYBRID}"
@@ -1491,7 +1504,8 @@ class PDFToDataApp:
             self.msgq.put(("server", "error", "Not installed"))
             return False
 
-        cmd = [exe, "--host", "127.0.0.1", "--port", str(port)]
+        cmd = updater.cli_argv("opendataloader-pdf-hybrid", exe) + [
+            "--host", "127.0.0.1", "--port", str(port)]
         if snap["force_ocr"]:
             cmd.append("--force-ocr")
             lang = str(snap["ocr_lang"] or "").strip()
@@ -1579,7 +1593,8 @@ class PDFToDataApp:
 
     # ---------------------------------------------------------------- conversion
     def build_command(self, exe, output_dir, snap):
-        cmd = [exe]
+        # Never invoke pip's .exe wrapper directly - see updater.cli_argv.
+        cmd = list(updater.cli_argv("opendataloader-pdf", exe))
         hybrid = snap["mode"] == "hybrid"
 
         if hybrid:
