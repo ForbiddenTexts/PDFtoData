@@ -369,8 +369,16 @@ class PDFToDataApp:
     def __init__(self, root):
         self.root = root
         self.root.title(APP_NAME)
-        self.root.geometry("980x820")
-        self.root.minsize(860, 680)
+        # Fit the actual screen. A fixed 980x820 with minsize(860,680) pushed the
+        # Convert button below the bottom edge on a 1366x768 laptop, and the
+        # minsize stopped the user shrinking the window enough to get it back.
+        self.root.update_idletasks()
+        screen_w = self.root.winfo_screenwidth()
+        screen_h = self.root.winfo_screenheight()
+        win_w = max(640, min(980, screen_w - 80))
+        win_h = max(460, min(820, screen_h - 120))   # leave room for the taskbar
+        self.root.geometry(f"{win_w}x{win_h}")
+        self.root.minsize(min(720, win_w), min(460, win_h))
 
         self.msgq = queue.Queue()
         self.files = []                  # list[str] of absolute .pdf paths
@@ -473,11 +481,17 @@ class PDFToDataApp:
         outer = ttk.Frame(self.root, padding=8)
         outer.pack(fill="both", expand=True)
 
+        # Pack the Convert bar FIRST, anchored to the bottom. pack() hands space
+        # out in call order, so anything packed after an expand=True widget gets
+        # whatever is left - which is nothing on a short window, silently
+        # clipping the most important control in the app.
+        self._build_action_bar(outer)
+
         paned = ttk.PanedWindow(outer, orient="vertical")
         paned.pack(fill="both", expand=True)
 
         top = ttk.Frame(paned)
-        paned.add(top, weight=3)
+        paned.add(top, weight=4)
 
         self.nb = ttk.Notebook(top)
         self.nb.pack(fill="both", expand=True)
@@ -492,7 +506,6 @@ class PDFToDataApp:
         bottom = ttk.Frame(paned)
         paned.add(bottom, weight=2)
         self._build_log(bottom)
-        self._build_action_bar(outer)
 
     # ------------------------------------------------------------------- 1) INPUT
     def _build_tab_input(self):
@@ -972,7 +985,7 @@ class PDFToDataApp:
 
         wrap = ttk.Frame(frame)
         wrap.pack(fill="both", expand=True)
-        self.logbox = tk.Text(wrap, wrap="none", height=12, font=("Consolas", 9),
+        self.logbox = tk.Text(wrap, wrap="none", height=6, font=("Consolas", 9),
                               state="disabled", background="#1e1e1e", foreground="#dcdcdc",
                               insertbackground="#dcdcdc")
         vs = ttk.Scrollbar(wrap, orient="vertical", command=self.logbox.yview)
@@ -1001,7 +1014,7 @@ class PDFToDataApp:
     # ------------------------------------------------------------------ 8) CONVERT
     def _build_action_bar(self, parent):
         bar = ttk.Frame(parent, padding=(0, 8, 0, 0))
-        bar.pack(fill="x")
+        bar.pack(side="bottom", fill="x")
 
         self.convert_btn = ttk.Button(bar, text="Convert", style="Convert.TButton",
                                       command=self.convert_clicked)
