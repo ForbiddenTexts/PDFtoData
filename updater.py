@@ -53,6 +53,7 @@ NET_TIMEOUT = 20
 
 IS_WINDOWS = os.name == "nt"
 CREATE_NO_WINDOW = 0x08000000
+CREATE_NEW_PROCESS_GROUP = 0x00000200
 
 # Status values used by the Updates tab.
 OK, UPDATE, MISSING, ERROR, CHECKING = "ok", "update", "missing", "error", "checking"
@@ -951,10 +952,15 @@ def apply_app_update(prepared, current_version, log_cb=None):
     log(f"handing off to bootstrapper for {new_version} (pid {os.getpid()})", "app")
     if log_cb:
         log_cb("Closing the app so the update can be applied…")
-    creation = 0
-    if IS_WINDOWS:
-        creation = CREATE_NO_WINDOW | 0x00000008  # DETACHED_PROCESS
-    subprocess.Popen(cmd, creationflags=creation, close_fds=True)
+    # DO NOT add DETACHED_PROCESS here. powershell.exe is a console application:
+    # with no console at all it fails to initialise and exits without running a
+    # single line, while Popen still hands back a PID - so the update silently
+    # never happens. CREATE_NO_WINDOW gives it a hidden console, which works, and
+    # CREATE_NEW_PROCESS_GROUP keeps Ctrl+C in this app from reaching it. The
+    # child outlives us on Windows regardless.
+    creation = (CREATE_NO_WINDOW | CREATE_NEW_PROCESS_GROUP) if IS_WINDOWS else 0
+    subprocess.Popen(cmd, creationflags=creation, close_fds=True,
+                     cwd=str(install_dir()))
     return plan_path
 
 

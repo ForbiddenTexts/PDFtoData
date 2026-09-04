@@ -193,7 +193,12 @@ Say '3/5  Creating the portable zip'
 $zipName = "$AppSlug-$Version-portable.zip"
 $zipPath = Join-Path $Dist $zipName
 if (Test-Path $zipPath) { Remove-Item -Force $zipPath }
-Compress-Archive -Path (Join-Path $Bundle '*') -DestinationPath $zipPath -CompressionLevel Optimal
+# Compress-Archive buffers the whole tree in memory - measured at 1.5 GB resident
+# for this bundle. ZipFile::CreateFromDirectory streams to disk instead. It also
+# writes the directory's *contents* at the archive root, matching the old layout.
+Add-Type -AssemblyName System.IO.Compression.FileSystem
+[System.IO.Compression.ZipFile]::CreateFromDirectory(
+    $Bundle, $zipPath, [System.IO.Compression.CompressionLevel]::Optimal, $false)
 $sha = (Get-FileHash -Path $zipPath -Algorithm SHA256).Hash.ToLower()
 Note "$zipName"
 Note ("zip size: {0:N0} MB" -f ((Get-Item $zipPath).Length / 1MB))

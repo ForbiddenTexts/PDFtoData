@@ -255,44 +255,48 @@ Everything is plain files, so nothing here requires the app to work:
 
 ## Verification status
 
-The full pipeline has been run end to end on Windows 11 with Inno Setup 6.7.3
-(installed per-user via winget, no admin) and PyInstaller 6.20:
+The whole pipeline has been run for real on Windows 11: build → publish → update.
 
-| Artifact | Size | Status |
-| --- | --- | --- |
-| `PDFtoData.exe` | 10 MB | built, launches, reads `version.json` |
-| `PDFtoData-1.0.0-portable.zip` | 546 MB | built, SHA-256 matches the published hash |
-| `PDFtoData-Setup-1.0.0.exe` | 343 MB | built, installs per-user in ~1 min, uninstalls clean |
+**Published and proven:** `github.com/ForbiddenTexts/PDFtoData`, release `v1.0.1`.
+An installed v1.0.0 discovered the release through the GitHub API, downloaded the
+546 MB asset, verified its SHA-256 against the release notes, backed up 15,892
+files, swapped them in 28 s, relaunched, and signalled healthy in under a second.
+`version.json` went 1.0.0 → 1.0.1 and the updated install still converts PDFs
+using only its bundled runtime.
 
-Verified on a real silent install (`/VERYSILENT /DIR=... /NOICONS`), then removed:
+Also verified: per-user install with no admin prompt (~1.4 min), clean uninstall
+that leaves `%APPDATA%\PDFtoData\settings.json` intact, and component detection
+resolving the bundled Python 3.11.9 and Temurin JRE 17 ahead of anything on PATH.
 
-- bundle layout is exactly `PDFtoData.exe` + `runtime\python` + `runtime\jre` +
-  `version.json` + `update_helper.ps1`, 1.7 GB installed
-- **a PDF converted using only the bundled runtime** — embedded Python 3.11.9,
-  pip-installed engine 2.5.7, bundled Temurin JRE 17 — with no system Python or
-  Java involved, which is what proves the `import site` `_pth` patch worked
-- the frozen exe starts and writes `.started-ok` with the right version, so the
-  auto-rollback protocol is live in the shipped build
-- component detection against the installed bundle resolves the **bundled** Python
-  and JRE ahead of anything on `PATH`
-- uninstall leaves no files behind, and `%APPDATA%\PDFtoData\settings.json`
-  survives, as intended
+### Two things that live testing caught
 
-Also unit-tested: backup/restore round-trip, SHA-256 diffing, zip-traversal
-rejection, `pip show` detection, the live PyPI lookup, graceful behaviour with no
-repo configured, and the bootstrapper in three scenarios — successful swap,
+**The updater was dead on arrival.** `apply_app_update` spawned the bootstrapper
+with `DETACHED_PROCESS`. `powershell.exe` is a console application: with no
+console it fails to initialise and exits without executing a line, while `Popen`
+still returns a PID, so nothing looks wrong. The app would close and simply never
+update. Unit tests missed it because they invoked the helper directly instead of
+through the real spawn. Fixed by using `CREATE_NO_WINDOW` alone (verified the
+child still outlives its parent). **Any build before this fix cannot self-update.**
+
+**Bytecode dominates the diff.** 15,791 of the 15,892 changed files (99%) were
+`.pyc`. pip compiles bytecode with timestamp-based invalidation, so identical
+source installed at a different moment yields different `.pyc` bytes and nearly
+the entire runtime "changes" between builds. Only 101 real files differed
+(`version.json` plus `.dist-info/RECORD` files, which index the `.pyc` hashes).
+An update therefore transfers and backs up ~1.5 GB even when nothing functional
+changed. Fix worth making: after pip install, run
+`python -m compileall -q -f --invalidation-mode unchecked-hash Lib\site-packages`
+so bytecode is deterministic across builds and diffs shrink to a few files.
+
+### Still not exercised
+
+The **locked-exe rename** path (`PDFtoData.exe` → `.old`, then copy). PyInstaller
+produced a byte-identical exe from unchanged source, so the SHA diff correctly
+skipped it and the live run never renamed a running exe. The synthetic
+bootstrapper test does cover it, but a release whose exe genuinely differs has
+not yet been installed over an older one.
+
+Unit-tested throughout: backup/restore round-trip, SHA-256 diffing, zip-traversal
+rejection, `pip show` detection, PyPI lookups, graceful handling of an
+unconfigured repo, and the bootstrapper in three scenarios — successful swap,
 watchdog rollback of a build that never starts, and abort when the app will not exit.
-
-**Still unproven:** the `gh release create` step (the GitHub CLI is not installed
-here) and therefore the whole in-app *app-update* download path against a real
-release. Engine updates, backup, rollback and the file swap are all tested; what
-has never run is "fetch a real GitHub release and install it". Cut a `v0.0.1`
-test release and update to it from a `v0.0.0` install before trusting that path.
-
-**Current artifacts in `dist/`** were built with `-Repo ForbiddenTexts/PDFtoData`:
-`version.json` is BOM-less, carries `"repo": "ForbiddenTexts/PDFtoData"`, and the zip's
-SHA-256 is `17008a64b8fd657b6c2c74ee6e154d41d53a011446ed015e8f6f7b5ed3109558`.
-App-update checks are therefore live and point at that repo. Until the repo has a
-published release, the Updates tab shows the App row as *"No published releases
-were found for this app"* with a link to create one — which is the expected state,
-not an error.
