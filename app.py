@@ -380,6 +380,7 @@ class PDFToDataApp:
         self.server_state = "stopped"    # stopped | starting | running | error
         self.server_port_running = None
         self.last_output_dir = ""
+        self.last_cli_output = []
         self.converting = False
 
         self.upd_components = {}         # key -> updater.Component
@@ -408,6 +409,9 @@ class PDFToDataApp:
         # rolls the update back after its watchdog expires.
         updater.write_started_ok()
         self._surface_update_failure()
+        bundled_jre = INSTALL_DIR / "runtime" / "jre" / "bin" / "java.exe"
+        if bundled_jre.is_file():
+            self.log(f"Using the bundled Java runtime: {bundled_jre}")
 
         self.check_environment(startup=True)
         self.root.after(1200, self.check_updates_async)
@@ -1492,8 +1496,10 @@ class PDFToDataApp:
         try:
             self.server_proc = subprocess.Popen(
                 cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                stdin=subprocess.DEVNULL,
                 text=True, encoding="utf-8", errors="replace", bufsize=1,
                 creationflags=_creationflags(),
+                env=updater.child_env(),
             )
         except Exception as exc:
             self.log(f"Could not start the hybrid server: {exc}", tag="err")
@@ -1683,12 +1689,12 @@ class PDFToDataApp:
             self.log(f"Converting {len(self.files)} file(s) into {output_dir}")
             self.log("$ " + " ".join(shlex.quote(c) for c in cmd), tag="cmd")
 
-            code = self._run_streamed(cmd)
+            code, out_tail = self._run_streamed(cmd)
             if code == 0:
                 ok = True
                 self.log(f"Done. Output written to {output_dir}", tag="ok")
             else:
-                self.log(f"The CLI exited with code {code}. Nothing further was run.", tag="err")
+                self._explain_cli_failure(code, out_tail)
         except Exception as exc:
             self.log(f"Unexpected error during conversion: {exc}", tag="err")
         finally:
@@ -1698,15 +1704,23 @@ class PDFToDataApp:
             self.msgq.put(("convert_done", ok, output_dir))
 
     def _run_streamed(self, cmd):
+        """Run the CLI, stream its output to the log, return (code, output_tail)."""
+        self.last_cli_output = []
         try:
             proc = subprocess.Popen(
                 cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                # A --windowed build has no valid stdin; handing the child an
+                # invalid handle can make it misbehave, so give it a real one.
+                stdin=subprocess.DEVNULL,
                 text=True, encoding="utf-8", errors="replace", bufsize=1,
                 creationflags=_creationflags(),
+                # Puts the bundled runtime\jre on PATH. Without this the engine
+                # cannot find Java on a machine with no system-wide install.
+                env=updater.child_env(),
             )
         except Exception as exc:
             self.log(f"Could not launch the CLI: {exc}", tag="err")
-            return -1
+            return -1, []
         self.active_proc = proc
         try:
             if proc.stdout is not None:
@@ -1714,10 +1728,40 @@ class PDFToDataApp:
                     line = line.rstrip()
                     if line:
                         self.log(line)
+                        self.last_cli_output.append(line)
+                        del self.last_cli_output[:-40]
             proc.wait()
         finally:
             self.active_proc = None
-        return proc.returncode
+        return proc.returncode, list(self.last_cli_output)
+
+    def _explain_cli_failure(self, code, out_tail):
+        """Turn a bare exit code into something the user can act on."""
+        blob = "\n".join(out_tail).lower()
+        self.log(f"The CLI exited with code {code}. Nothing further was run.", tag="err")
+
+        if "java" in blob and ("not found" in blob or "not recognized" in blob):
+            jre = INSTALL_DIR / "runtime" / "jre" / "bin" / "java.exe"
+            if jre.is_file():
+                msg = ("The engine could not find Java, even though this install has a bundled "
+                       f"one at {jre}. Please report this - the log above has the details.")
+            else:
+                msg = ("The engine needs Java 11+ and could not find any. This copy has no "
+                       "bundled runtime\\jre folder, so install Java from adoptium.net "
+                       "(or reinstall the app using the full installer).")
+            self.log(msg, tag="err")
+            self.msgq.put(("upd_error", "The conversion failed: Java was not found.", msg))
+            return
+
+        if not out_tail:
+            msg = (f"The conversion tool exited with code {code} without printing anything. "
+                   "The most common causes are a missing Java runtime or an incomplete "
+                   "install - check the Environment tab.")
+            self.log(msg, tag="err")
+            self.msgq.put(("upd_error", f"The conversion tool exited with code {code}.", msg))
+            return
+
+        self.log("See the CLI output above for the reason.", tag="err")
 
     def _apply_convert_done(self, ok, output_dir):
         if ok and output_dir:

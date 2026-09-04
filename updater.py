@@ -321,6 +321,28 @@ def parse_java_major(text):
     return first
 
 
+def child_env():
+    """Environment for CLI subprocesses, with the bundled JRE made findable.
+
+    The opendataloader-pdf wrapper resolves Java from PATH only - setting
+    JAVA_HOME alone does nothing (verified: JAVA_HOME-only still fails with
+    "'java' command not found", jre\\bin on PATH converts fine). Without this a
+    shipped bundle carries a JRE it can never use, and every conversion fails on
+    any machine that has no system-wide Java.
+
+    Returns None when there is no bundled JRE, so the caller just inherits the
+    environment and falls back to whatever Java is on PATH.
+    """
+    jre = install_dir() / "runtime" / "jre"
+    java = jre / "bin" / ("java.exe" if IS_WINDOWS else "java")
+    if not java.is_file():
+        return None
+    env = os.environ.copy()
+    env["PATH"] = str(jre / "bin") + os.pathsep + env.get("PATH", "")
+    env["JAVA_HOME"] = str(jre)
+    return env
+
+
 def java_executable():
     """Bundled JRE first, then PATH."""
     rj = runtime_java()
